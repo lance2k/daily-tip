@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# daily-tip — one vim/bash/zsh tip per day, shown on the first terminal of the day.
+# Usage: daily-tip [again|next|list]
+#   (no arg)  show the next tip, but only once per calendar day
+#   again     reprint today's tip
+#   next      advance to one more tip right now
+#   list      show all tips; > marks the current one
+set -u
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/daily-tip"
+STATE_FILE="$STATE_DIR/state"
+
+# Ordered as a rough curriculum: survival first, power tools later.
+mapfile -t TIPS <<'EOF'
+bash|Ctrl+R searches your command history as you type. Press Ctrl+R again to cycle through older matches. The single highest-value shell keybinding.
+vim|Getting out: press Esc, then :q! to quit without saving, or :wq to save and quit. Learn the exits first.
+bash|!! reruns the last command. sudo !! reruns it with sudo — the classic use.
+vim|Move with h j k l (left, down, up, right). Stay off the arrow keys for one day and it becomes muscle memory.
+bash|Ctrl+A jumps to the start of the line, Ctrl+E to the end. Faster than holding an arrow key.
+vim|i inserts before the cursor, a inserts after, o opens a new line below. Esc returns to normal mode.
+bash|cd - returns to the previous directory. Great for bouncing between two folders.
+vim|x deletes a character, dd deletes the whole line, u undoes, Ctrl+R redoes.
+bash|Alt+. inserts the last argument of the previous command. Try: mkdir newdir, then cd and press Alt+.
+vim|0 jumps to the start of the line, $ to the end, gg to the top of the file, G to the bottom.
+bash|Ctrl+W deletes the word before the cursor, Ctrl+U wipes the whole line. Faster than backspacing.
+vim|w jumps to the next word, b back one word, e to the end of a word. Prefix a count: 3w jumps three words.
+bash|mkdir -p a/b/c creates the whole nested path in one command, and never errors if parts already exist.
+vim|ciw = change inner word, with the cursor anywhere inside the word. The gateway to text objects.
+bash|Brace expansion: cp config.yml{,.bak} copies config.yml to config.yml.bak in one go.
+vim|The dot command . repeats your last change. Fix one spot, then press . at every other spot.
+bash|Inside less (and man pages): / searches, n jumps to the next match, q quits.
+vim|/text searches forward, n next match, N previous. * searches for the word under the cursor.
+bash|grep -rn "pattern" . searches every file below the current directory and shows line numbers.
+vim|d pairs with any motion: dw deletes a word, d$ deletes to end of line, dG deletes to end of file.
+bash|tail -f app.log streams a log file live as it grows. Ctrl+C stops watching.
+vim|Counts work everywhere: 5dd deletes five lines, 3x deletes three characters, 2p pastes twice.
+bash|Ctrl+L clears the screen without erasing the command you are typing.
+vim|yy yanks (copies) the current line, p pastes it below the cursor, P pastes above.
+zsh|Type .. and press Enter to go up a directory — oh-my-zsh sets this up. ... goes up two.
+vim|:%s/old/new/g replaces old with new in the whole file. Add c to confirm each one: :%s/old/new/gc
+bash|Chain commands: a && b runs b only if a succeeded, a || b runs b only if a failed.
+vim|A jumps to end of line and inserts, I jumps to the first character and inserts. Motion + insert in one key.
+zsh|Press Tab on a partial path like /u/lo/b and zsh expands it to /usr/local/bin.
+vim|f plus a character jumps to that character on the line, ; repeats the jump, F searches backward.
+bash|df -h shows disk space per mount, du -sh * shows the size of everything in the current folder.
+vim|>> indents the current line, << outdents. In visual mode, select lines then press > or <.
+bash|find . -name "*.log" -mtime +7 finds log files older than seven days. Add -delete only after verifying the list.
+vim|v starts character selection, V selects whole lines. Then y, d, or > act on the selection.
+bash|ln -s /path/to/target linkname creates a symlink. Check where one points with readlink -f.
+vim|Text objects: di" deletes inside quotes, ci( changes inside parens, da[ includes the brackets. i = inside, a = around.
+bash|ps aux | grep myapp finds a process. Try kill PID first; kill -9 is the last resort.
+vim|% jumps between matching brackets — ( to ), { to }. Handy for spotting unbalanced pairs.
+zsh|Recursive globs are built in: ls **/*.md lists every markdown file in the tree, no find needed.
+vim|J joins the next line onto the current one with a space. gJ joins without the space.
+bash|awk picks columns: ps aux | awk '{print $2}' prints just the PIDs. $1 is the first column.
+vim|Set a mark with ma, jump back to it with `a. Uppercase marks (mA) work across files.
+bash|sed -i 's/old/new/g' file.txt does find-and-replace directly in the file. Run it without -i first to preview.
+vim|Deleted something after yanking? "0p pastes the last yank — register 0 holds yanks and ignores deletes.
+bash|Start scripts with set -euo pipefail: exit on errors, on unset variables, and on pipeline failures.
+vim|Ctrl+O jumps back to where you just were, Ctrl+I jumps forward again — works across files too.
+bash|Ctrl+Z suspends the current program, bg resumes it in the background, fg brings it back, jobs lists them.
+vim|:e file opens a file, :ls shows open buffers, :b name switches to one (Tab completes the name).
+bash|curl -s api.example.com | jq . fetches JSON and pretty-prints it. jq '.field' extracts a value.
+vim|gf opens the file path under the cursor. Ctrl+O brings you back.
+zsh|!$ is the last argument of the previous command, !* is all of its arguments.
+vim|~ toggles the case of the character under the cursor. gUiw uppercases a word, guiw lowercases it.
+bash|watch -n 2 'docker ps' reruns a command every two seconds and shows the output full-screen.
+vim|:earlier 5m rewinds the file to five minutes ago, :later moves forward. Undo is a time machine.
+bash|diff <(sort a.txt) <(sort b.txt) compares the output of two commands — process substitution.
+vim|Macros: qa records keystrokes into register a, q stops recording, @a replays, 10@a replays ten times.
+bash|trap 'rm -f "$tmpfile"' EXIT runs cleanup when a script exits — even on errors or Ctrl+C.
+vim|:g/pattern/d deletes every line matching pattern, :v/pattern/d deletes every line NOT matching.
+zsh|fc opens your last command in $EDITOR — fix a long broken command in vim, save, quit, and it runs.
+vim|Ctrl+A increments the number under the cursor, Ctrl+X decrements it. Works on the next number on the line.
+EOF
+
+count=${#TIPS[@]}
+today=$(date +%Y-%m-%d)
+
+last_date=""
+idx=-1
+[[ -f $STATE_FILE ]] && read -r last_date idx < "$STATE_FILE"
+[[ $idx =~ ^-?[0-9]+$ ]] || idx=-1
+
+show() {
+  local tip=${TIPS[$1]}
+  local cat=${tip%%|*} text=${tip#*|}
+  if [[ -t 1 ]]; then
+    printf '\n\033[1;36m\xf0\x9f\x92\xa1 Daily tip %d/%d\033[0m \033[2m[%s]\033[0m\n   %s\n\n' "$(($1 + 1))" "$count" "$cat" "$text"
+  else
+    printf 'Daily tip %d/%d [%s]: %s\n' "$(($1 + 1))" "$count" "$cat" "$text"
+  fi
+}
+
+save() {
+  mkdir -p "$STATE_DIR"
+  printf '%s %s\n' "$today" "$idx" > "$STATE_FILE"
+}
+
+case "${1:-}" in
+  again)
+    (( idx >= 0 )) || idx=0
+    show "$idx"
+    ;;
+  next)
+    idx=$(( (idx + 1) % count ))
+    show "$idx"
+    save
+    ;;
+  list)
+    for i in "${!TIPS[@]}"; do
+      marker=' '
+      (( i == idx )) && marker='>'
+      printf '%s %2d [%s] %s\n' "$marker" "$((i + 1))" "${TIPS[$i]%%|*}" "${TIPS[$i]#*|}"
+    done
+    ;;
+  '')
+    [[ $last_date == "$today" ]] && exit 0
+    idx=$(( (idx + 1) % count ))
+    show "$idx"
+    save
+    ;;
+  *)
+    echo "usage: daily-tip [again|next|list]" >&2
+    exit 1
+    ;;
+esac
